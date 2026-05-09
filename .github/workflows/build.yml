@@ -29,46 +29,44 @@ jobs:
 
       - name: Generate timestamp variables
         run: |
-          echo "TAG_NAME=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-          echo "RELEASE_NAME=Released on $(date +%Y%m%d%H%M)" >> $GITHUB_ENV
-        shell: bash
+          echo "RELEASE_NAME=Released on $(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
+          echo "TAG_NAME=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
 
-      - name: Build geoip files
-        run: go run ./ convert -c config.json
+      - name: Build and Clean GeoIP files
+        run: |
+          # 1. 运行核心转换逻辑
+          go run ./ convert -c config.json
+          
+          # 2. 清洗根目录：删除根目录下所有的拆分 .srs, .mrs, .txt 文件
+          # 但利用 ! -name 逻辑，排除掉你需要的 geoip.srs 和 geoip.mrs 汇总文件
+          cd output
+          find . -maxdepth 1 -type f -name "*.srs" ! -name "geoip.srs" -delete
+          find . -maxdepth 1 -type f -name "*.mrs" ! -name "geoip.mrs" -delete
+          find . -maxdepth 1 -type f -name "*.txt" -delete
 
-      - name: Generate checksums
+      - name: Generate recursive checksums
         run: |
           cd output
-          for file in *; do
-            if [[ -f "$file" ]]; then
-              sha256sum "$file" > "${file}.sha256sum"
-            fi
+          # 3. 递归遍历 output 下的所有文件（包括文件夹内的拆分文件）
+          # 进入文件所在目录执行 sha256sum，确保校验文件与源文件在同一层目录
+          find . -type f ! -name "*.sha256sum" | while read -r filepath; do
+            dir=$(dirname "$filepath")
+            base=$(basename "$filepath")
+            (cd "$dir" && sha256sum "$base" > "${base}.sha256sum")
           done
 
-      - name: Upload to Cloudflare R2 (Distribution)
+      - name: Upload to Cloudflare R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: |
-          # --delete 参数确保 R2 上只保留最新生成的文件，与本地 output 文件夹绝对同步
+          # 4. AWS CLI 会自动保留并同步本地的文件夹结构到 R2 存储桶
           aws s3 sync ./output s3://${{ secrets.R2_BUCKET_NAME }}/ \
             --endpoint-url https://${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com \
             --delete
 
-      - name: Git push assets to "release" branch
-        run: |
-          cd output || exit 1
-          git init
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -b release
-          git add -A
-          git commit -m "${{ env.RELEASE_NAME }}"
-          git remote add geoip "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-          git push -f -u geoip release
-
-      - name: Move files and push to release branch
+      - name: Push to release branch
         run: |
           mkdir -p publish
           cp -R output/* publish/
@@ -80,13 +78,18 @@ jobs:
           git add .
           git commit -m "${{ env.RELEASE_NAME }}"
           git remote add origin "https://${{ github.actor }}:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}"
-          # 强制推送到 release 分支，保持分支轻量
           git push -f origin release
 
-      - name: Create GitHub Release (Archive)
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          files: publish/*
+          # 5. 精准控制 Release 附件：只上传这 4 个汇总文件及其对应的 .sha256sum 文件
+          # 忽略所有的子文件夹 (srs/, mrs/, text/)
+          files: |
+            publish/geoip.dat*
+            publish/Country.mmdb*
+            publish/geoip.srs*
+            publish/geoip.mrs*
 
