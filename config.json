@@ -62,13 +62,6 @@
       "args": {
         "outputDir": "./output/mrs"
       }
-    },
-    {
-      "type": "nginx",
-      "action": "output",
-      "args": {
-        "outputDir": "./output/nginx"
-      }
     }
   ]
 }
