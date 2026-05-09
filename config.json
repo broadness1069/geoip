@@ -37,22 +37,6 @@
       "type": "singboxSRS",
       "action": "output",
       "args": {
-        "outputDir": "./output",
-        "outputName": "geoip.srs"
-      }
-    },
-    {
-      "type": "mihomoMRS",
-      "action": "output",
-      "args": {
-        "outputDir": "./output",
-        "outputName": "geoip.mrs"
-      }
-    },
-    {
-      "type": "singboxSRS",
-      "action": "output",
-      "args": {
         "outputDir": "./output/srs"
       }
     },

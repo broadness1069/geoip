@@ -32,23 +32,15 @@ jobs:
           echo "RELEASE_NAME=Released on $(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
           echo "TAG_NAME=$(date +'%Y%m%d%H%M')" >> $GITHUB_ENV
 
-      - name: Build and Clean GeoIP files
+      - name: Build GeoIP files
         run: |
-          # 1. 运行核心转换逻辑
+          # 运行转换，文件会直接按照 config.json 配置的路径完美归位
           go run ./ convert -c config.json
-          
-          # 2. 清洗根目录：删除根目录下所有的拆分 .srs, .mrs, .txt 文件
-          # 但利用 ! -name 逻辑，排除掉你需要的 geoip.srs 和 geoip.mrs 汇总文件
-          cd output
-          find . -maxdepth 1 -type f -name "*.srs" ! -name "geoip.srs" -delete
-          find . -maxdepth 1 -type f -name "*.mrs" ! -name "geoip.mrs" -delete
-          find . -maxdepth 1 -type f -name "*.txt" -delete
 
       - name: Generate recursive checksums
         run: |
           cd output
-          # 3. 递归遍历 output 下的所有文件（包括文件夹内的拆分文件）
-          # 进入文件所在目录执行 sha256sum，确保校验文件与源文件在同一层目录
+          # 递归遍历所有文件，并在同级目录生成 .sha256sum
           find . -type f ! -name "*.sha256sum" | while read -r filepath; do
             dir=$(dirname "$filepath")
             base=$(basename "$filepath")
@@ -61,7 +53,6 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
         run: |
-          # 4. AWS CLI 会自动保留并同步本地的文件夹结构到 R2 存储桶
           aws s3 sync ./output s3://${{ secrets.R2_BUCKET_NAME }}/ \
             --endpoint-url https://${{ secrets.CF_ACCOUNT_ID }}.r2.cloudflarestorage.com \
             --delete
@@ -85,11 +76,7 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: ${{ env.RELEASE_NAME }}
-          # 5. 精准控制 Release 附件：只上传这 4 个汇总文件及其对应的 .sha256sum 文件
-          # 忽略所有的子文件夹 (srs/, mrs/, text/)
+          # Release 只保留这两个大文件及其校验码
           files: |
             publish/geoip.dat*
             publish/Country.mmdb*
-            publish/geoip.srs*
-            publish/geoip.mrs*
-
